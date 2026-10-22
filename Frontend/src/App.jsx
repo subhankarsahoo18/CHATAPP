@@ -1,6 +1,7 @@
 import Navbar from "./components/Navbar";
 
 import HomePage from "./pages/HomePage";
+import LandingPage from "./pages/LandingPage";
 import SignUpPage from "./pages/SignUpPage";
 import LoginPage from "./pages/LoginPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -26,8 +27,14 @@ const App = () => {
   // Show loading spinner while checking auth
   if (isCheckingAuth && !authUser) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader className="size-10 animate-spin" />
+      <div className="flex flex-col items-center justify-center h-screen bg-[#1e232d] text-white gap-4">
+        <div className="relative">
+          <div className="size-16 rounded-2xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-[0_0_30px_rgba(56,189,248,0.4)] animate-pulse">
+            <span className="text-2xl font-black">G</span>
+          </div>
+          <div className="absolute inset-0 rounded-2xl bg-sky-400/20 blur-xl animate-ping" />
+        </div>
+        <p className="text-xs text-white/50 font-semibold tracking-widest uppercase">Connecting to Gupshup...</p>
       </div>
     );
   }
@@ -39,6 +46,16 @@ const App = () => {
       <Routes>
         <Route
           path="/"
+          element={authUser ? <HomePage /> : <LandingPage />}
+        />
+
+        <Route
+          path="/landing"
+          element={<LandingPage />}
+        />
+
+        <Route
+          path="/chat"
           element={authUser ? <HomePage /> : <Navigate to="/login" />}
         />
 
