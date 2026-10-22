@@ -14,8 +14,11 @@ import {
 import { soundFx } from "../lib/audioSound";
 import { getAvatar } from "../lib/avatar";
 
+import { useChatStore } from "../store/useChatStore";
+
 const Navbar = () => {
   const { logout, authUser } = useAuthStore();
+  const { selectedUser } = useChatStore();
   const location = useLocation();
   const [isSoundOn, setIsSoundOn] = useState(soundFx.isSoundEnabled());
 
@@ -30,9 +33,14 @@ const Navbar = () => {
 
   const userAvatar = authUser ? getAvatar(authUser) : null;
   const isAuthPage = location.pathname === "/login" || location.pathname === "/signup";
+  const isChatActiveOnMobile = Boolean(selectedUser && (location.pathname === "/" || location.pathname === "/chat"));
 
   return (
-    <header className="fixed top-0 w-full z-40 bg-slate-950/80 backdrop-blur-2xl border-b border-white/10 px-4 sm:px-8 py-3 flex justify-between items-center transition-all shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+    <header
+      className={`fixed top-0 w-full z-40 bg-slate-950/80 backdrop-blur-2xl border-b border-white/10 px-4 sm:px-8 py-3 justify-between items-center transition-all shadow-[0_4px_30px_rgba(0,0,0,0.5)] ${
+        isChatActiveOnMobile ? "hidden md:flex" : "flex"
+      }`}
+    >
       {/* Brand logo */}
       <div className="flex items-center gap-6">
         <Link to="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity group">

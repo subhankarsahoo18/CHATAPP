@@ -326,10 +326,13 @@ const MessageInput = () => {
   };
 
   return (
-    <div className="p-3 sm:p-4 w-full bg-transparent sticky bottom-0 z-20">
+    <div
+      className="p-2 sm:p-4 w-full max-w-full bg-transparent sticky bottom-0 z-20"
+      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+    >
       {/* Replying banner */}
       {replyingTo && (
-        <div className="mb-2 p-2.5 rounded-2xl bg-[var(--color-surface)]/90 backdrop-blur-xl border border-sky-500/30 shadow-lg flex items-center justify-between animate-fade-in">
+        <div className="mb-2 p-2 sm:p-2.5 rounded-2xl bg-[var(--color-surface)]/90 backdrop-blur-xl border border-sky-500/30 shadow-lg flex items-center justify-between animate-fade-in">
           <div className="flex items-center gap-2.5 min-w-0">
             <Reply className="size-4 text-sky-400 flex-shrink-0" />
             <div className="min-w-0 text-xs">
@@ -343,7 +346,7 @@ const MessageInput = () => {
           </div>
           <button
             onClick={() => setReplyingTo(null)}
-            className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+            className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors flex-shrink-0"
           >
             <X className="size-4" />
           </button>
@@ -374,7 +377,7 @@ const MessageInput = () => {
       {isEmojiPickerOpen && (
         <div
           ref={emojiPickerRef}
-          className="absolute bottom-20 left-4 z-40 w-72 sm:w-80 p-3 rounded-2xl glass-panel bg-slate-950/95 border border-white/15 shadow-2xl animate-modal-pop"
+          className="absolute bottom-16 sm:bottom-20 left-2 sm:left-4 z-40 w-[calc(100vw-1rem)] sm:w-80 max-w-xs p-3 rounded-2xl glass-panel bg-slate-950/95 border border-white/15 shadow-2xl animate-modal-pop"
         >
           <div className="text-xs font-bold text-white/50 uppercase tracking-wider mb-2 px-1">
             Pick an Emoji
@@ -396,72 +399,72 @@ const MessageInput = () => {
 
       {/* Main input bar or voice recording bar */}
       {isRecording ? (
-        <div className="flex items-center justify-between p-2 rounded-full glass-panel border border-red-500/30 bg-red-950/30 shadow-xl animate-fade-in">
-          <div className="flex items-center gap-3 pl-3">
-            <span className="size-3 rounded-full bg-red-500 animate-ping" />
-            <span className="text-xs font-mono font-bold text-red-400">
+        <div className="flex items-center justify-between p-1.5 sm:p-2 rounded-full glass-panel border border-red-500/30 bg-red-950/30 shadow-xl animate-fade-in w-full min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 pl-2 sm:pl-3 min-w-0">
+            <span className="size-2.5 sm:size-3 rounded-full bg-red-500 animate-ping flex-shrink-0" />
+            <span className="text-xs font-mono font-bold text-red-400 truncate">
               Recording {formatRecordingTime(recordingDuration)}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
               type="button"
               onClick={cancelRecording}
-              className="p-2.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+              className="p-2 sm:p-2.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
               title="Cancel recording"
             >
-              <Trash2 className="size-4.5" />
+              <Trash2 className="size-4 sm:size-4.5" />
             </button>
             <button
               type="button"
               onClick={sendVoiceNote}
-              className="p-2.5 rounded-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold transition-all shadow-[0_0_15px_rgba(56,189,248,0.4)]"
+              className="p-2 sm:p-2.5 rounded-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold transition-all shadow-[0_0_15px_rgba(56,189,248,0.4)]"
               title="Send voice message"
             >
-              <Send className="size-4.5" />
+              <Send className="size-4 sm:size-4.5" />
             </button>
           </div>
         </div>
       ) : (
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2 sm:gap-3">
-          <div className="flex-1 flex items-center gap-1.5 sm:gap-2 glass-panel rounded-full px-2 sm:px-3 py-1 border border-white/10 shadow-xl focus-within:border-sky-400 focus-within:shadow-[0_0_20px_rgba(56,189,248,0.15)] transition-all">
+        <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-3 w-full min-w-0">
+          <div className="flex-1 min-w-0 flex items-center gap-0.5 sm:gap-2 glass-panel rounded-full px-1.5 sm:px-3 py-0.5 sm:py-1 border border-white/10 shadow-xl focus-within:border-sky-400 focus-within:shadow-[0_0_20px_rgba(56,189,248,0.15)] transition-all">
             {/* Attachment Button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+              className={`p-1.5 sm:p-2 rounded-full transition-colors flex-shrink-0 ${
                 imagePreview
                   ? "text-sky-400 bg-white/10"
                   : "text-white/60 hover:text-white hover:bg-white/10"
               }`}
               title="Attach photo from files"
             >
-              <Image className="size-5" />
+              <Image className="size-4.5 sm:size-5" />
             </button>
 
             {/* Live Camera Snapshot Button */}
             <button
               type="button"
               onClick={() => setIsCameraModalOpen(true)}
-              className="p-2 rounded-full transition-colors flex-shrink-0 text-white/60 hover:text-sky-400 hover:bg-white/10"
+              className="p-1.5 sm:p-2 rounded-full transition-colors flex-shrink-0 text-white/60 hover:text-sky-400 hover:bg-white/10"
               title="Open camera view to take photo"
             >
-              <Camera className="size-5" />
+              <Camera className="size-4.5 sm:size-5" />
             </button>
 
             {/* Emoji Button */}
             <button
               type="button"
               onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
-              className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+              className={`p-1.5 sm:p-2 rounded-full transition-colors flex-shrink-0 ${
                 isEmojiPickerOpen
                   ? "text-sky-400 bg-white/10"
                   : "text-white/60 hover:text-white hover:bg-white/10"
               }`}
               title="Insert emoji"
             >
-              <Smile className="size-5" />
+              <Smile className="size-4.5 sm:size-5" />
             </button>
 
             {/* Text Input */}
@@ -472,7 +475,7 @@ const MessageInput = () => {
               value={text}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              className="flex-1 bg-transparent border-none text-white placeholder-white/35 text-sm sm:text-[15px] focus:outline-none px-2 py-2.5"
+              className="flex-1 min-w-0 w-full bg-transparent border-none text-white placeholder-white/35 text-sm sm:text-[15px] focus:outline-none px-1.5 sm:px-2 py-2 sm:py-2.5"
             />
 
             <input
@@ -488,19 +491,19 @@ const MessageInput = () => {
           {text.trim() || imagePreview ? (
             <button
               type="submit"
-              className="size-11 sm:size-12 rounded-full flex-shrink-0 bg-gradient-to-tr from-sky-500 to-indigo-600 text-white flex items-center justify-center shadow-[0_0_20px_rgba(56,189,248,0.35)] hover:scale-105 active:scale-95 transition-all"
+              className="size-10 sm:size-12 rounded-full flex-shrink-0 bg-gradient-to-tr from-sky-500 to-indigo-600 text-white flex items-center justify-center shadow-[0_0_20px_rgba(56,189,248,0.35)] hover:scale-105 active:scale-95 transition-all"
               title="Send message"
             >
-              <Send className="size-5 translate-x-0.5" />
+              <Send className="size-4.5 sm:size-5 translate-x-0.5" />
             </button>
           ) : (
             <button
               type="button"
               onClick={startRecording}
-              className="size-11 sm:size-12 rounded-full flex-shrink-0 bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/10 shadow-lg hover:scale-105 active:scale-95 transition-all group"
+              className="size-10 sm:size-12 rounded-full flex-shrink-0 bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/10 shadow-lg hover:scale-105 active:scale-95 transition-all group"
               title="Record voice note"
             >
-              <Mic className="size-5 text-sky-400 group-hover:scale-110 transition-transform" />
+              <Mic className="size-4.5 sm:size-5 text-sky-400 group-hover:scale-110 transition-transform" />
             </button>
           )}
         </form>

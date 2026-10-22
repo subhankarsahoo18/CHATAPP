@@ -13,8 +13,12 @@ const HomePage = () => {
   const { selectedUser } = useChatStore();
 
   return (
-    <div className="h-screen bg-transparent pt-16 flex flex-col overflow-hidden">
-      <div className="flex flex-1 h-[calc(100vh-4rem)] w-full overflow-hidden relative">
+    <div
+      className={`h-[100dvh] min-h-[100dvh] bg-transparent flex flex-col overflow-hidden ${
+        selectedUser ? "pt-0 md:pt-16" : "pt-16"
+      }`}
+    >
+      <div className="flex flex-1 h-full w-full overflow-hidden relative">
         {/* Sidebar: always visible on desktop; on mobile visible only when no chat is active */}
         <div
           className={`h-full ${

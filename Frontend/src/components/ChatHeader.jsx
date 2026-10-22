@@ -63,12 +63,12 @@ const ChatHeader = () => {
 
   return (
     <div className="border-b border-white/10 sticky top-0 z-30 backdrop-blur-xl bg-[var(--color-surface)]/75">
-      <div className="p-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="p-2.5 sm:p-3.5 flex items-center justify-between gap-2 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           {/* Back button on mobile */}
           <button
             onClick={() => setSelectedUser(null)}
-            className="md:hidden p-2 -ml-1 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+            className="md:hidden p-1.5 sm:p-2 -ml-1 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors flex-shrink-0"
             title="Back to chats"
           >
             <ArrowLeft className="size-5" />
@@ -79,7 +79,7 @@ const ChatHeader = () => {
             onClick={() => setIsContactDrawerOpen(!isContactDrawerOpen)}
             className="relative flex-shrink-0 cursor-pointer group"
           >
-            <div className="size-11 rounded-full overflow-hidden border border-white/15 shadow-lg group-hover:scale-105 transition-transform">
+            <div className="size-9 sm:size-11 rounded-full overflow-hidden border border-white/15 shadow-lg group-hover:scale-105 transition-transform">
               <img
                 src={avatarUrl}
                 alt={isGroup ? selectedUser.name : selectedUser.fullName}
@@ -87,24 +87,24 @@ const ChatHeader = () => {
               />
             </div>
             {isGroup ? (
-              <span className="absolute bottom-0 right-0 size-3.5 bg-emerald-500 rounded-full ring-2 ring-slate-900 flex items-center justify-center text-white text-[8px]">
-                <Users className="size-2.5" />
+              <span className="absolute bottom-0 right-0 size-3 sm:size-3.5 bg-emerald-500 rounded-full ring-2 ring-slate-900 flex items-center justify-center text-white text-[7px] sm:text-[8px]">
+                <Users className="size-2 sm:size-2.5" />
               </span>
             ) : isOnline ? (
-              <span className="absolute bottom-0 right-0 size-3 bg-emerald-400 rounded-full ring-2 ring-slate-900 shadow-[0_0_8px_#34d399]" />
+              <span className="absolute bottom-0 right-0 size-2.5 sm:size-3 bg-emerald-400 rounded-full ring-2 ring-slate-900 shadow-[0_0_8px_#34d399]" />
             ) : null}
           </div>
 
           {/* User/Group Info (Clickable) */}
           <div
             onClick={() => setIsContactDrawerOpen(!isContactDrawerOpen)}
-            className="cursor-pointer min-w-0"
+            className="cursor-pointer min-w-0 flex-1"
           >
-            <h3 className="font-bold text-white text-[15px] truncate tracking-tight hover:text-sky-300 transition-colors flex items-center gap-1.5">
+            <h3 className="font-bold text-white text-sm sm:text-[15px] truncate tracking-tight hover:text-sky-300 transition-colors flex items-center gap-1.5">
               <span>{isGroup ? selectedUser.name : selectedUser.fullName}</span>
             </h3>
 
-            <div className="text-xs font-medium flex items-center gap-1.5 mt-0.5 truncate max-w-[200px] sm:max-w-xs">
+            <div className="text-[11px] sm:text-xs font-medium flex items-center gap-1.5 mt-0.5 truncate max-w-[150px] sm:max-w-xs">
               {isGroup ? (
                 isGroupTyping ? (
                   <span className="text-emerald-400 font-semibold flex items-center gap-1 animate-pulse">
@@ -130,49 +130,49 @@ const ChatHeader = () => {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
           {/* Voice Call */}
           <button
             onClick={() => handleCall("audio")}
-            className="p-2.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+            className="p-1.5 sm:p-2.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
             title={isGroup ? "Group voice call" : "Voice call"}
           >
-            <Phone className="size-4.5" />
+            <Phone className="size-4 sm:size-4.5" />
           </button>
 
           {/* Video Call */}
           <button
             onClick={() => handleCall("video")}
-            className="p-2.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+            className="p-1.5 sm:p-2.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
             title={isGroup ? "Group video call" : "Video call"}
           >
-            <Video className="size-4.5" />
+            <Video className="size-4 sm:size-4.5" />
           </button>
 
           {/* Search in chat toggle */}
           <button
             onClick={() => setIsSearchInChatOpen(!isSearchInChatOpen)}
-            className={`p-2.5 rounded-full transition-colors ${
+            className={`p-1.5 sm:p-2.5 rounded-full transition-colors ${
               isSearchInChatOpen
                 ? "bg-sky-500/20 text-sky-400"
                 : "hover:bg-white/10 text-white/70 hover:text-white"
             }`}
             title="Search in conversation"
           >
-            <Search className="size-4.5" />
+            <Search className="size-4 sm:size-4.5" />
           </button>
 
           {/* Contact / Group Details Drawer toggle */}
           <button
             onClick={() => setIsContactDrawerOpen(!isContactDrawerOpen)}
-            className={`p-2.5 rounded-full transition-colors ${
+            className={`p-1.5 sm:p-2.5 rounded-full transition-colors ${
               isContactDrawerOpen
                 ? "bg-white/15 text-white"
                 : "hover:bg-white/10 text-white/70 hover:text-white"
             }`}
             title={isGroup ? "Group info" : "Contact details"}
           >
-            <Info className="size-4.5" />
+            <Info className="size-4 sm:size-4.5" />
           </button>
 
           {/* Close Chat on Desktop */}
