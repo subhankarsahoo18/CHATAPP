@@ -3,14 +3,22 @@
 import { Server } from "socket.io";
 import http from "http";
 import express from "express";
+import { isOriginAllowed } from "./utils.js";
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     credentials: true,
+    methods: ["GET", "POST"],
   },
 });
 
@@ -28,7 +36,7 @@ export function getReceiverSocketId(userId) {
 io.on("connection", async (socket) => {
   console.log("User connected:", socket.id);
 
-  const userId = socket.handshake.query.userId;
+  const userId = socket.handshake.query.userId || socket.handshake.auth?.userId;
 
   if (userId) {
     userSocketMap[userId.toString()] = socket.id;

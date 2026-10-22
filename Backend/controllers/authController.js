@@ -1,25 +1,9 @@
 import mongoose from "mongoose";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import cloudinary from "../lib/cloudinary.js";
 import { connectDB } from "../lib/db.js";
-
-// ================= GENERATE TOKEN =================
-const generateToken = (userId, res) => {
-  const token = jwt.sign(
-    { userId },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  res.cookie("jwt", token, {
-    httpOnly: true,
-    secure: false,
-    sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-};
+import { generateToken, isProduction } from "../lib/utils.js";
 
 // ================= SIGNUP =================
 export const signup = async (req, res) => {
@@ -69,7 +53,7 @@ export const signup = async (req, res) => {
       password: hashedPassword,
     });
 
-    generateToken(newUser._id, res);
+    const token = generateToken(newUser._id, res);
 
     res.status(201).json({
       _id: newUser._id,
@@ -79,6 +63,7 @@ export const signup = async (req, res) => {
       email: newUser.email,
       profilePic: newUser.profilePic,
       about: newUser.about,
+      token,
     });
 
   } catch (error) {
@@ -116,7 +101,7 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    generateToken(user._id, res);
+    const token = generateToken(user._id, res);
 
     res.status(200).json({
       _id: user._id,
@@ -126,6 +111,7 @@ export const login = async (req, res) => {
       email: user.email,
       profilePic: user.profilePic,
       about: user.about || "Hey there! I am using Gupshup.",
+      token,
     });
 
   } catch (error) {
@@ -137,7 +123,13 @@ export const login = async (req, res) => {
 // ================= LOGOUT =================
 export const logout = (req, res) => {
   try {
-    res.cookie("jwt", "", { maxAge: 0 });
+    res.cookie("jwt", "", {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      maxAge: 0,
+      expires: new Date(0),
+    });
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
     res.status(500).json({ message: "Internal Server Error" });

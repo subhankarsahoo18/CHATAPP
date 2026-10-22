@@ -29,6 +29,9 @@ export const useAuthStore = create((set, get) => ({
         get().connectSocket();
       }
     } catch (error) {
+      if (error?.response?.status === 401) {
+        localStorage.removeItem("token");
+      }
       set({ authUser: null });
     } finally {
       set({ isCheckingAuth: false });
@@ -41,6 +44,10 @@ export const useAuthStore = create((set, get) => ({
 
     try {
       const res = await axiosInstance.post("/auth/signup", data);
+
+      if (res.data?.token) {
+        localStorage.setItem("token", res.data.token);
+      }
 
       set({ authUser: res.data });
       toast.success("Account created successfully");
@@ -62,6 +69,10 @@ export const useAuthStore = create((set, get) => ({
     try {
       const res = await axiosInstance.post("/auth/login", data);
 
+      if (res.data?.token) {
+        localStorage.setItem("token", res.data.token);
+      }
+
       set({ authUser: res.data });
       toast.success("Logged in successfully");
 
@@ -81,6 +92,7 @@ export const useAuthStore = create((set, get) => ({
       await axiosInstance.post("/auth/logout");
 
       get().disconnectSocket();
+      localStorage.removeItem("token");
 
       set({
         authUser: null,
@@ -89,6 +101,12 @@ export const useAuthStore = create((set, get) => ({
 
       toast.success("Logged out successfully");
     } catch (error) {
+      localStorage.removeItem("token");
+      get().disconnectSocket();
+      set({
+        authUser: null,
+        onlineUsers: [],
+      });
       toast.error(
         error?.response?.data?.message || "Logout failed"
       );
@@ -128,10 +146,13 @@ export const useAuthStore = create((set, get) => ({
       socket.disconnect();
     }
 
+    const token = localStorage.getItem("token");
+
     const newSocket = io(BASE_URL, {
       query: { userId: authUser._id },
+      auth: { token, userId: authUser._id },
       withCredentials: true,
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
     });
 
     newSocket.on("connect", () => {
