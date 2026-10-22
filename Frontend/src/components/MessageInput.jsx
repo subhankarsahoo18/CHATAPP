@@ -117,7 +117,7 @@ const MessageInput = () => {
 
       if (!navigator?.mediaDevices?.getUserMedia) {
         if (!window.isSecureContext) {
-          toast.error("Microphone requires a secure origin. Please open via http://localhost:5173", { duration: 6000 });
+          toast.error("Microphone requires a secure origin (HTTPS or localhost).", { duration: 6000 });
         } else {
           toast.error("Your browser does not support audio recording.", { duration: 5000 });
         }
