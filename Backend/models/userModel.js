@@ -7,6 +7,18 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
 
+    username: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+
+    mobileNumber: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+
     email: {
       type: String,
       required: true,
@@ -22,6 +34,10 @@ const userSchema = new mongoose.Schema(
     profilePic: {   // ✅ FIXED NAME
       type: String,
       default: "",
+    },
+    about: {
+      type: String,
+      default: "Hey there! I am using Gupshup.",
     },
   },
   { timestamps: true }

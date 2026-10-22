@@ -9,9 +9,10 @@ import express from "express";
 import { connectDB } from "./lib/db.js";
 import authRoutes from "./routes/auth.js";
 import messageRoutes from "./routes/messageRoute.js";
+import groupRoutes from "./routes/groupRoute.js";
 import { app, server } from "./lib/socket.js";
 
-const PORT = process.env.PORT || 5005;
+const PORT = process.env.PORT || 5006;
 const __dirname = path.resolve();
 
 // 🔥 INCREASE BODY LIMIT HERE
@@ -37,6 +38,7 @@ app.use(
 
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/groups", groupRoutes);
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "../frontend/dist")));
@@ -46,7 +48,11 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-server.listen(PORT, async () => {
-  console.log("🚀 Server running on PORT:", PORT);
+const startServer = async () => {
   await connectDB();
-});
+  server.listen(PORT, () => {
+    console.log("🚀 Server running on PORT:", PORT);
+  });
+};
+
+startServer();

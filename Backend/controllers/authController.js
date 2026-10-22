@@ -1,7 +1,9 @@
+import mongoose from "mongoose";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cloudinary from "../lib/cloudinary.js";
+import { connectDB } from "../lib/db.js";
 
 // ================= GENERATE TOKEN =================
 const generateToken = (userId, res) => {
@@ -22,9 +24,19 @@ const generateToken = (userId, res) => {
 // ================= SIGNUP =================
 export const signup = async (req, res) => {
   try {
-    const { fullName, email, password } = req.body;
+    if (mongoose.connection.readyState !== 1) {
+      await connectDB();
+    }
 
-    if (!fullName || !email || !password) {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        message: "Database unavailable. Check your MongoDB connection and try again.",
+      });
+    }
+
+    const { fullName, email, password, username, mobileNumber } = req.body;
+
+    if (!fullName || !email || !password || !username || !mobileNumber) {
       return res.status(400).json({ message: "All fields required" });
     }
 
@@ -32,9 +44,19 @@ export const signup = async (req, res) => {
       return res.status(400).json({ message: "Password must be 6+ chars" });
     }
 
-    const userExists = await User.findOne({ email });
-    if (userExists) {
+    const emailExists = await User.findOne({ email });
+    if (emailExists) {
       return res.status(400).json({ message: "Email already exists" });
+    }
+
+    const usernameExists = await User.findOne({ username });
+    if (usernameExists) {
+      return res.status(400).json({ message: "Username already exists" });
+    }
+
+    const mobileExists = await User.findOne({ mobileNumber });
+    if (mobileExists) {
+      return res.status(400).json({ message: "Mobile number already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -42,6 +64,8 @@ export const signup = async (req, res) => {
     const newUser = await User.create({
       fullName,
       email,
+      username,
+      mobileNumber,
       password: hashedPassword,
     });
 
@@ -50,8 +74,11 @@ export const signup = async (req, res) => {
     res.status(201).json({
       _id: newUser._id,
       fullName: newUser.fullName,
+      username: newUser.username,
+      mobileNumber: newUser.mobileNumber,
       email: newUser.email,
-      profilePic: newUser.profilePic, // ✅ FIXED
+      profilePic: newUser.profilePic,
+      about: newUser.about,
     });
 
   } catch (error) {
@@ -63,6 +90,16 @@ export const signup = async (req, res) => {
 // ================= LOGIN =================
 export const login = async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      await connectDB();
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        message: "Database unavailable. Check your MongoDB connection and try again.",
+      });
+    }
+
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
@@ -84,8 +121,11 @@ export const login = async (req, res) => {
     res.status(200).json({
       _id: user._id,
       fullName: user.fullName,
+      username: user.username,
+      mobileNumber: user.mobileNumber,
       email: user.email,
-      profilePic: user.profilePic, // ✅ FIXED
+      profilePic: user.profilePic,
+      about: user.about || "Hey there! I am using Gupshup.",
     });
 
   } catch (error) {
@@ -116,13 +156,7 @@ export const checkAuth = (req, res) => {
 // ================= UPDATE PROFILE =================
 export const updateProfile = async (req, res) => {
   try {
-    const { profilePic } = req.body;
-
-    if (!profilePic) {
-      return res.status(400).json({
-        message: "Profile picture required",
-      });
-    }
+    const { profilePic, username, mobileNumber, fullName, about } = req.body;
 
     if (!req.user || !req.user._id) {
       return res.status(401).json({
@@ -130,20 +164,42 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-   const uploadResponse = await cloudinary.uploader.upload(profilePic, {
-  folder: "chat_profiles",
-  resource_type: "image",
-  timeout: 120000, // 2 minutes
-  transformation: [
-    { width: 500, height: 500, crop: "limit" },
-    { quality: "auto" }
-  ]
-});
+    const updates = {};
+    if (fullName) updates.fullName = fullName;
+    if (about !== undefined) updates.about = about;
 
+    if (username && username !== req.user.username) {
+      const usernameExists = await User.findOne({ username });
+      if (usernameExists) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+      updates.username = username;
+    }
+
+    if (mobileNumber && mobileNumber !== req.user.mobileNumber) {
+      const mobileExists = await User.findOne({ mobileNumber });
+      if (mobileExists) {
+        return res.status(400).json({ message: "Mobile number already exists" });
+      }
+      updates.mobileNumber = mobileNumber;
+    }
+
+    if (profilePic && profilePic !== req.user.profilePic && profilePic.startsWith("data:image")) {
+       const uploadResponse = await cloudinary.uploader.upload(profilePic, {
+         folder: "chat_profiles",
+         resource_type: "image",
+         timeout: 120000, // 2 minutes
+         transformation: [
+           { width: 500, height: 500, crop: "limit" },
+           { quality: "auto" }
+         ]
+       });
+       updates.profilePic = uploadResponse.secure_url;
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
-      { profilePic: uploadResponse.secure_url },
+      updates,
       { new: true }
     ).select("-password");
 
