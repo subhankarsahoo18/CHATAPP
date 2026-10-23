@@ -2,6 +2,7 @@
 import { soundFx } from "./audioSound";
 
 let swRegistration = null;
+const recentlyNotifiedMessageIds = new Set();
 
 /**
  * Register Service Worker for native background notifications
@@ -15,6 +16,22 @@ export const initServiceWorker = async () => {
       return reg;
     } catch (err) {
       console.warn("[Notification] Service Worker registration failed:", err);
+      return null;
+    }
+  }
+  return null;
+};
+
+/**
+ * Helper to get the ready Service Worker registration
+ */
+export const getActiveServiceWorker = async () => {
+  if (swRegistration) return swRegistration;
+  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      swRegistration = await navigator.serviceWorker.ready;
+      return swRegistration;
+    } catch (e) {
       return null;
     }
   }
@@ -117,13 +134,14 @@ export const showDeviceNotification = async ({
   };
 
   // Try Service Worker registration first (standard for modern browsers & Android)
-  if (swRegistration && "showNotification" in swRegistration) {
-    try {
-      await swRegistration.showNotification(title, options);
+  try {
+    const reg = await getActiveServiceWorker();
+    if (reg && "showNotification" in reg) {
+      await reg.showNotification(title, options);
       return true;
-    } catch (e) {
-      console.warn("SW notification failed, falling back to window.Notification:", e);
     }
+  } catch (e) {
+    console.warn("SW notification failed, falling back to window.Notification:", e);
   }
 
   // Fallback to standard window Notification
@@ -153,31 +171,61 @@ export const notifyOfflineMessages = (messages, onOpenChat) => {
   if (!Array.isArray(messages) || messages.length === 0) return;
   if (!isNotificationsEnabled()) return;
 
-  soundFx.playReceivedSound();
+  // Filter out any messages we already notified in the last 5 minutes to avoid duplicates
+  const freshMessages = messages.filter((msg) => {
+    const id = msg._id?.toString();
+    if (!id) return true;
+    if (recentlyNotifiedMessageIds.has(id)) return false;
+    recentlyNotifiedMessageIds.add(id);
 
-  // Group messages by sender
-  const messagesBySender = {};
+    // Expire after 5 minutes
+    setTimeout(() => {
+      recentlyNotifiedMessageIds.delete(id);
+    }, 5 * 60 * 1000);
 
-  messages.forEach((msg) => {
-    const sender = msg.senderId;
-    const senderId = typeof sender === "object" ? sender?._id : sender;
-    if (!senderId) return;
-
-    if (!messagesBySender[senderId]) {
-      messagesBySender[senderId] = {
-        sender: typeof sender === "object" ? sender : { _id: senderId, fullName: "New Message" },
-        messages: [],
-      };
-    }
-    messagesBySender[senderId].messages.push(msg);
+    return true;
   });
 
-  // Display one notification per sender on device notification panel
-  Object.values(messagesBySender).forEach(({ sender, messages }) => {
+  if (freshMessages.length === 0) return;
+
+  soundFx.playReceivedSound();
+
+  // Separate direct messages and group messages
+  const directBySender = {};
+  const groupByGroup = {};
+
+  freshMessages.forEach((msg) => {
+    if (msg.isGroup || msg.groupId) {
+      const gId = typeof msg.groupId === "object" ? msg.groupId?._id : msg.groupId;
+      if (!gId) return;
+      if (!groupByGroup[gId]) {
+        groupByGroup[gId] = {
+          group: typeof msg.groupId === "object" ? msg.groupId : { _id: gId, name: "Group" },
+          messages: [],
+        };
+      }
+      groupByGroup[gId].messages.push(msg);
+    } else {
+      const sender = msg.senderId;
+      const senderId = typeof sender === "object" ? sender?._id : sender;
+      if (!senderId) return;
+
+      if (!directBySender[senderId]) {
+        directBySender[senderId] = {
+          sender: typeof sender === "object" ? sender : { _id: senderId, fullName: "New Message" },
+          messages: [],
+        };
+      }
+      directBySender[senderId].messages.push(msg);
+    }
+  });
+
+  // 1. Display notifications for 1-on-1 direct messages
+  Object.values(directBySender).forEach(({ sender, messages: senderMsgs }) => {
     const senderName = sender.fullName || "Someone";
     const avatar = sender.profilePic;
-    const count = messages.length;
-    const latestMessage = messages[messages.length - 1];
+    const count = senderMsgs.length;
+    const latestMessage = senderMsgs[senderMsgs.length - 1];
     const preview = formatMessagePreview(latestMessage);
 
     const title = count > 1 ? `${senderName} (${count} new messages)` : senderName;
@@ -189,10 +237,41 @@ export const notifyOfflineMessages = (messages, onOpenChat) => {
       icon: avatar,
       senderId: sender._id,
       isGroup: false,
-      tag: `offline-${sender._id}`,
+      tag: `offline-direct-${sender._id}`,
       onClick: () => {
         if (typeof onOpenChat === "function") {
-          onOpenChat(sender);
+          onOpenChat(sender, false);
+        }
+      },
+    });
+  });
+
+  // 2. Display notifications for group messages
+  Object.values(groupByGroup).forEach(({ group, messages: groupMsgs }) => {
+    const groupName = group.name || "Group Chat";
+    const avatar = group.groupPic;
+    const count = groupMsgs.length;
+    const latestMessage = groupMsgs[groupMsgs.length - 1];
+    const latestSender =
+      typeof latestMessage.senderId === "object"
+        ? latestMessage.senderId?.fullName
+        : "Member";
+    const preview = formatMessagePreview(latestMessage);
+
+    const title = count > 1 ? `${groupName} (${count} messages)` : groupName;
+    const body = `${latestSender}: ${preview}`;
+
+    showDeviceNotification({
+      title,
+      body,
+      icon: avatar,
+      senderId: null,
+      isGroup: true,
+      groupId: group._id,
+      tag: `offline-group-${group._id}`,
+      onClick: () => {
+        if (typeof onOpenChat === "function") {
+          onOpenChat(group, true);
         }
       },
     });

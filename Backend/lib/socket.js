@@ -9,6 +9,8 @@ const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
+  pingInterval: 10000,
+  pingTimeout: 5000,
   cors: {
     origin: (origin, callback) => {
       if (isOriginAllowed(origin)) {
@@ -23,6 +25,7 @@ const io = new Server(server, {
 });
 
 import Message from "../models/messageModel.js";
+import Group from "../models/groupModel.js";
 import mongoose from "mongoose";
 
 // Store online users
@@ -35,6 +38,72 @@ export function getReceiverSocketId(userId) {
   return userSocketMap[key];
 }
 
+/**
+ * Helper to fetch all unread messages (1-on-1 and group) that arrived while user was offline
+ */
+async function fetchOfflineMessagesForUser(userId) {
+  if (!userId || mongoose.connection.readyState !== 1) return [];
+
+  try {
+    // 1. Fetch unread 1-on-1 messages received by this user
+    const pendingDirectMessages = await Message.find({
+      receiverId: userId,
+      status: { $ne: "read" },
+      deletedFor: { $nin: [userId] },
+    })
+      .populate("senderId", "fullName username profilePic")
+      .populate("replyTo", "text senderId image audio")
+      .sort({ createdAt: 1 })
+      .limit(50);
+
+    // 2. Fetch unread group messages for groups this user belongs to
+    let pendingGroupMessages = [];
+    try {
+      const userGroups = await Group.find({ members: userId }).select("_id name groupPic");
+      const groupIds = userGroups.map((g) => g._id);
+
+      if (groupIds.length > 0) {
+        pendingGroupMessages = await Message.find({
+          groupId: { $in: groupIds },
+          senderId: { $ne: userId },
+          "readBy.userId": { $ne: userId },
+          deletedFor: { $nin: [userId] },
+        })
+          .populate("senderId", "fullName username profilePic")
+          .populate("groupId", "name groupPic")
+          .populate({
+            path: "replyTo",
+            populate: {
+              path: "senderId",
+              select: "fullName username",
+            },
+          })
+          .sort({ createdAt: 1 })
+          .limit(50);
+      }
+    } catch (grpErr) {
+      console.warn("[Socket] Error finding group offline messages:", grpErr.message);
+    }
+
+    const allOffline = [...pendingDirectMessages, ...pendingGroupMessages];
+
+    // Mark pending 1-on-1 messages with status 'sent' as 'delivered'
+    const sentCount = await Message.countDocuments({ receiverId: userId, status: "sent" });
+    if (sentCount > 0) {
+      await Message.updateMany(
+        { receiverId: userId, status: "sent" },
+        { $set: { status: "delivered" } }
+      );
+      io.emit("messagesDelivered", { receiverId: userId });
+    }
+
+    return allOffline;
+  } catch (err) {
+    console.error("[Socket] Error in fetchOfflineMessagesForUser:", err);
+    return [];
+  }
+}
+
 io.on("connection", async (socket) => {
   console.log("User connected:", socket.id);
 
@@ -44,54 +113,20 @@ io.on("connection", async (socket) => {
     userSocketMap[userId.toString()] = socket.id;
 
     // 🔥 Find and deliver messages that arrived while user was offline (internet off)
-    if (mongoose.connection.readyState === 1) {
-      try {
-        const pendingMessages = await Message.find({
-          receiverId: userId,
-          status: "sent",
-        })
-          .populate("senderId", "fullName username profilePic")
-          .populate("replyTo", "text senderId image audio")
-          .sort({ createdAt: 1 });
-
-        if (pendingMessages.length > 0) {
-          await Message.updateMany(
-            { receiverId: userId, status: "sent" },
-            { $set: { status: "delivered" } }
-          );
-
-          // Notify senders that messages are delivered (double ticks)
-          io.emit("messagesDelivered", { receiverId: userId });
-
-          // Send all messages that arrived while offline to the reconnecting user
-          socket.emit("offlineMessagesReceived", pendingMessages);
-          console.log(`[Socket] Delivered ${pendingMessages.length} offline messages to user ${userId}`);
-        }
-      } catch (err) {
-        console.log("Error updating delivered status:", err);
-      }
+    const offlineMessages = await fetchOfflineMessagesForUser(userId);
+    if (offlineMessages.length > 0) {
+      socket.emit("offlineMessagesReceived", offlineMessages);
+      console.log(`[Socket] Delivered ${offlineMessages.length} offline messages to user ${userId}`);
     }
   }
 
   // Explicit check for offline messages requested by frontend on network recovery
   socket.on("checkOfflineMessages", async () => {
-    if (!userId || mongoose.connection.readyState !== 1) return;
-    try {
-      const pendingMessages = await Message.find({
-        receiverId: userId,
-        status: { $ne: "read" },
-        deletedFor: { $nin: [userId] },
-      })
-        .populate("senderId", "fullName username profilePic")
-        .populate("replyTo", "text senderId image audio")
-        .sort({ createdAt: 1 })
-        .limit(50);
-
-      if (pendingMessages.length > 0) {
-        socket.emit("offlineMessagesReceived", pendingMessages);
-      }
-    } catch (err) {
-      console.log("Error in checkOfflineMessages:", err);
+    if (!userId) return;
+    const offlineMessages = await fetchOfflineMessagesForUser(userId);
+    if (offlineMessages.length > 0) {
+      socket.emit("offlineMessagesReceived", offlineMessages);
+      console.log(`[Socket] Responded to checkOfflineMessages with ${offlineMessages.length} messages for user ${userId}`);
     }
   });
 

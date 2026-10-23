@@ -153,21 +153,41 @@ export const useAuthStore = create((set, get) => ({
       auth: { token, userId: authUser._id },
       withCredentials: true,
       transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 2000,
+      timeout: 10000,
     });
 
     newSocket.on("connect", () => {
-      console.log("Socket connected:", newSocket.id);
+      console.log("[Socket] Connected:", newSocket.id);
     });
 
     newSocket.on("getOnlineUsers", (userIds) => {
       set({ onlineUsers: userIds });
     });
 
-    newSocket.on("disconnect", () => {
-      console.log("Socket disconnected");
+    newSocket.on("disconnect", (reason) => {
+      console.log("[Socket] Disconnected:", reason);
     });
 
     set({ socket: newSocket });
+  },
+
+  // ================= RECONNECT SOCKET (IMMEDIATE ON NETWORK RESTORE) =================
+  reconnectSocket: () => {
+    const { socket, authUser, connectSocket } = get();
+    if (!authUser) return;
+
+    if (socket) {
+      if (!socket.connected) {
+        console.log("[Socket] Force reconnecting socket on network recovery...");
+        socket.connect();
+      }
+    } else {
+      connectSocket();
+    }
   },
 
   // ================= DISCONNECT SOCKET =================

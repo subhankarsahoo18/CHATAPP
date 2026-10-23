@@ -635,6 +635,15 @@ export const useChatStore = create((set, get) => ({
     // Clean up existing listeners
     get().unsubscribeFromMessages();
 
+    // 🔥 Trigger check on socket connect / reconnect
+    socket.off("connect");
+    socket.on("connect", () => {
+      console.log("[Socket] Connected / Reconnected - checking offline messages immediately");
+      get().checkOfflineMessages();
+      get().getUsers();
+      get().getGroups();
+    });
+
     // 1-on-1 NEW MESSAGE LISTENER
     socket.on("newMessage", (newMessage) => {
       const { selectedUser, messages, users } = get();
@@ -1016,9 +1025,14 @@ export const useChatStore = create((set, get) => ({
       if (!Array.isArray(offlineMessages) || offlineMessages.length === 0) return;
 
       // 1. Show device notification on notification panel with sender name & message
-      notifyOfflineMessages(offlineMessages, (sender) => {
-        const user = get().users.find((u) => u._id === sender._id) || sender;
-        get().setSelectedUser(user);
+      notifyOfflineMessages(offlineMessages, (target, isGroup) => {
+        if (isGroup) {
+          const group = get().groups.find((g) => g._id === target._id) || target;
+          get().setSelectedUser(group);
+        } else {
+          const user = get().users.find((u) => u._id === target._id) || target;
+          get().setSelectedUser(user);
+        }
       });
 
       // 2. Refresh sidebar contacts and groups
@@ -1027,17 +1041,32 @@ export const useChatStore = create((set, get) => ({
 
       // 3. If currently open chat matches, append new messages
       const currentChat = get().selectedUser;
-      if (currentChat && !currentChat.isGroup) {
-        const relevant = offlineMessages.filter((m) => {
-          const sId = typeof m.senderId === "object" ? m.senderId?._id : m.senderId;
-          return sId?.toString() === currentChat._id?.toString();
-        });
-        if (relevant.length > 0) {
-          set((state) => {
-            const existingIds = new Set(state.messages.map((m) => m._id));
-            const newItems = relevant.filter((m) => !existingIds.has(m._id));
-            return { messages: [...state.messages, ...newItems] };
+      if (currentChat) {
+        if (currentChat.isGroup || currentChat.members) {
+          const relevant = offlineMessages.filter((m) => {
+            const gId = typeof m.groupId === "object" ? m.groupId?._id : m.groupId;
+            return gId?.toString() === currentChat._id?.toString();
           });
+          if (relevant.length > 0) {
+            set((state) => {
+              const existingIds = new Set(state.messages.map((m) => m._id));
+              const newItems = relevant.filter((m) => !existingIds.has(m._id));
+              return { messages: [...state.messages, ...newItems] };
+            });
+          }
+        } else {
+          const relevant = offlineMessages.filter((m) => {
+            if (m.isGroup || m.groupId) return false;
+            const sId = typeof m.senderId === "object" ? m.senderId?._id : m.senderId;
+            return sId?.toString() === currentChat._id?.toString();
+          });
+          if (relevant.length > 0) {
+            set((state) => {
+              const existingIds = new Set(state.messages.map((m) => m._id));
+              const newItems = relevant.filter((m) => !existingIds.has(m._id));
+              return { messages: [...state.messages, ...newItems] };
+            });
+          }
         }
       }
     });
@@ -1059,21 +1088,27 @@ export const useChatStore = create((set, get) => ({
 
   checkOfflineMessages: async () => {
     const socket = useAuthStore.getState().socket;
-    if (socket) {
+    if (socket && socket.connected) {
       socket.emit("checkOfflineMessages");
     }
 
     try {
       const res = await axiosInstance.get("/messages/unread-offline");
       if (Array.isArray(res.data) && res.data.length > 0) {
-        notifyOfflineMessages(res.data, (sender) => {
-          const user = get().users.find((u) => u._id === sender._id) || sender;
-          get().setSelectedUser(user);
+        notifyOfflineMessages(res.data, (target, isGroup) => {
+          if (isGroup) {
+            const group = get().groups.find((g) => g._id === target._id) || target;
+            get().setSelectedUser(group);
+          } else {
+            const user = get().users.find((u) => u._id === target._id) || target;
+            get().setSelectedUser(user);
+          }
         });
         get().getUsers();
+        get().getGroups();
       }
     } catch (err) {
-      console.warn("Could not fetch offline unread messages:", err);
+      console.warn("Could not fetch offline unread messages:", err?.message || err);
     }
   },
 

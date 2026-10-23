@@ -19,43 +19,83 @@ const HomePage = () => {
     setSelectedUser,
     users,
     groups,
+    subscribeToMessages,
     subscribeToCalls,
     checkOfflineMessages,
     getUsers,
     getGroups,
   } = useChatStore();
-  const { socket } = useAuthStore();
+  const { socket, reconnectSocket } = useAuthStore();
 
-  // Ensure call signaling is continuously active whenever the socket is connected
+  // 🔥 Ensure message listening and call signaling are continuously active whenever socket is connected
   useEffect(() => {
     if (socket) {
+      subscribeToMessages();
       subscribeToCalls();
     }
-  }, [socket, subscribeToCalls]);
+  }, [socket, subscribeToMessages, subscribeToCalls]);
 
-  // 🔥 DETECT WHEN USER TURNS ON INTERNET CONNECTION
+  // 🔥 DETECT WHEN USER TURNS ON INTERNET CONNECTION & INSTANTLY DELIVER NOTIFICATIONS
   useEffect(() => {
-    const handleOnline = () => {
-      console.log("[Network] Internet connection restored!");
-      toast.success("Internet connection restored! Checking for messages...", {
-        icon: "🌐",
-      });
+    let retryTimers = [];
+
+    const syncNetworkAndMessages = () => {
+      // 1. Force socket to reconnect immediately if disconnected
+      reconnectSocket();
+
+      // 2. Fetch offline messages and refresh contacts & groups
       checkOfflineMessages();
       getUsers();
       getGroups();
+    };
+
+    const handleOnline = () => {
+      console.log("[Network] Internet connection restored - triggering instant message check");
+      toast.success("Internet connection restored! Checking messages...", {
+        icon: "🌐",
+      });
+
+      // Clear any prior retry timers
+      retryTimers.forEach(clearTimeout);
+      retryTimers = [];
+
+      // 1. Immediate sync attempt
+      syncNetworkAndMessages();
+
+      // 2. Staged retries at 1000ms, 2500ms, and 5000ms to guarantee delivery as DNS & TLS stabilize
+      const delays = [1000, 2500, 5000];
+      delays.forEach((delay) => {
+        const timer = setTimeout(() => {
+          if (typeof navigator !== "undefined" && navigator.onLine) {
+            syncNetworkAndMessages();
+          }
+        }, delay);
+        retryTimers.push(timer);
+      });
     };
 
     window.addEventListener("online", handleOnline);
 
     // Initial check when page mounts if user is already online
     if (typeof navigator !== "undefined" && navigator.onLine) {
-      checkOfflineMessages();
+      syncNetworkAndMessages();
     }
+
+    // Periodic gentle heartbeat check (every 20 seconds) while online
+    const intervalTimer = setInterval(() => {
+      if (typeof navigator !== "undefined" && navigator.onLine) {
+        if (!socket || !socket.connected) {
+          reconnectSocket();
+        }
+      }
+    }, 20000);
 
     return () => {
       window.removeEventListener("online", handleOnline);
+      retryTimers.forEach(clearTimeout);
+      clearInterval(intervalTimer);
     };
-  }, [checkOfflineMessages, getUsers, getGroups]);
+  }, [checkOfflineMessages, getUsers, getGroups, reconnectSocket, socket]);
 
   // Handle clicking notifications from device notification shade / panel
   useEffect(() => {

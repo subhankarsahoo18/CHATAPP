@@ -1,5 +1,6 @@
 import User from "../models/userModel.js";
 import Message from "../models/messageModel.js";
+import Group from "../models/groupModel.js";
 import cloudinary from "../lib/cloudinary.js";
 import { io, getReceiverSocketId } from "../lib/socket.js";
 
@@ -337,8 +338,8 @@ export const getUnreadOfflineMessages = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Find all unread messages received by this user while offline or disconnected
-    const unreadMessages = await Message.find({
+    // 1. Find all unread direct messages received by this user
+    const unreadDirectMessages = await Message.find({
       receiverId: userId,
       status: { $ne: "read" },
       deletedFor: { $nin: [userId] },
@@ -348,14 +349,46 @@ export const getUnreadOfflineMessages = async (req, res) => {
       .sort({ createdAt: 1 })
       .limit(100);
 
-    // Update 'sent' messages to 'delivered'
-    await Message.updateMany(
-      { receiverId: userId, status: "sent" },
-      { $set: { status: "delivered" } }
-    );
-    io.emit("messagesDelivered", { receiverId: userId });
+    // 2. Find all unread group messages for groups this user belongs to
+    let unreadGroupMessages = [];
+    try {
+      const userGroups = await Group.find({ members: userId }).select("_id name groupPic");
+      const groupIds = userGroups.map((g) => g._id);
 
-    res.status(200).json(unreadMessages);
+      if (groupIds.length > 0) {
+        unreadGroupMessages = await Message.find({
+          groupId: { $in: groupIds },
+          senderId: { $ne: userId },
+          "readBy.userId": { $ne: userId },
+          deletedFor: { $nin: [userId] },
+        })
+          .populate("senderId", "fullName username profilePic")
+          .populate("groupId", "name groupPic")
+          .populate({
+            path: "replyTo",
+            populate: {
+              path: "senderId",
+              select: "fullName username",
+            },
+          })
+          .sort({ createdAt: 1 })
+          .limit(100);
+      }
+    } catch (grpErr) {
+      console.warn("Error fetching unread group messages:", grpErr.message);
+    }
+
+    // Update 'sent' messages to 'delivered'
+    const sentCount = await Message.countDocuments({ receiverId: userId, status: "sent" });
+    if (sentCount > 0) {
+      await Message.updateMany(
+        { receiverId: userId, status: "sent" },
+        { $set: { status: "delivered" } }
+      );
+      io.emit("messagesDelivered", { receiverId: userId });
+    }
+
+    res.status(200).json([...unreadDirectMessages, ...unreadGroupMessages]);
   } catch (error) {
     console.error("Error in getUnreadOfflineMessages:", error.message);
     res.status(500).json({ error: "Internal server error" });
