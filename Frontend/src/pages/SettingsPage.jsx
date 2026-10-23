@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { THEMES } from "../constants";
 import { useThemeStore } from "../store/useThemeStore";
 import {
@@ -12,10 +12,20 @@ import {
   Mic,
   Camera,
   Bell,
+  BellRing,
   Play,
   Monitor,
+  Smartphone,
+  AlertCircle,
 } from "lucide-react";
 import { soundFx } from "../lib/audioSound";
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  requestNotificationPermission,
+  showDeviceNotification,
+} from "../lib/deviceNotification";
+import toast from "react-hot-toast";
 
 const PREVIEW_MESSAGES = [
   {
@@ -35,6 +45,12 @@ const PREVIEW_MESSAGES = [
 const SettingsPage = () => {
   const { theme, setTheme } = useThemeStore();
   const [isSoundOn, setIsSoundOn] = useState(soundFx.isSoundEnabled());
+  const [notifPermission, setNotifPermission] = useState(getNotificationPermission());
+  const [isNotifTesting, setIsNotifTesting] = useState(false);
+
+  useEffect(() => {
+    setNotifPermission(getNotificationPermission());
+  }, []);
 
   const handleToggleSound = () => {
     const nextState = !isSoundOn;
@@ -43,6 +59,40 @@ const SettingsPage = () => {
     if (nextState) {
       soundFx.playSentSound();
     }
+  };
+
+  const handleEnableDeviceNotifications = async () => {
+    const granted = await requestNotificationPermission();
+    setNotifPermission(getNotificationPermission());
+    if (granted) {
+      toast.success("Device notifications enabled!", { icon: "🔔" });
+    } else {
+      toast.error("Notification permission was not granted by browser.");
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    if (notifPermission !== "granted") {
+      const granted = await requestNotificationPermission();
+      setNotifPermission(getNotificationPermission());
+      if (!granted) {
+        toast.error("Please allow notifications first.");
+        return;
+      }
+    }
+
+    setIsNotifTesting(true);
+    soundFx.playReceivedSound();
+
+    await showDeviceNotification({
+      title: "Gupshup — Rahul Sharma",
+      body: "Hey! When you turn on your internet connection, new messages appear right here in your device notification panel! 🚀",
+      icon: "/avatar.svg",
+      tag: "test-notification",
+    });
+
+    toast.success("Test notification sent to your device panel!", { icon: "🔔" });
+    setTimeout(() => setIsNotifTesting(false), 1000);
   };
 
   return (
@@ -149,7 +199,84 @@ const SettingsPage = () => {
           </div>
         </div>
 
-        {/* 2. Visual Themes Grid */}
+        {/* 2. Device & Lockscreen Notifications (WhatsApp-Style) */}
+        <div className="glass-panel p-6 sm:p-7 rounded-3xl border border-white/10 shadow-2xl bg-slate-900/60 backdrop-blur-2xl space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="size-10 rounded-2xl bg-indigo-500/15 text-indigo-400 flex items-center justify-center shadow-inner flex-shrink-0">
+                <Smartphone className="size-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-white text-base">Device & Notification Panel Alerts</h3>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${
+                      notifPermission === "granted"
+                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                        : notifPermission === "denied"
+                        ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                        : "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                    }`}
+                  >
+                    <span
+                      className={`size-1.5 rounded-full ${
+                        notifPermission === "granted"
+                          ? "bg-emerald-400"
+                          : notifPermission === "denied"
+                          ? "bg-red-400"
+                          : "bg-sky-400"
+                      }`}
+                    />
+                    {notifPermission === "granted"
+                      ? "Active & Enabled"
+                      : notifPermission === "denied"
+                      ? "Blocked in Browser"
+                      : "Permission Needed"}
+                  </span>
+                </div>
+                <p className="text-xs text-white/50 mt-0.5">
+                  Get WhatsApp-style notifications with sender name & message in your device notification panel when you turn on internet
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              {notifPermission !== "granted" ? (
+                <button
+                  type="button"
+                  onClick={handleEnableDeviceNotifications}
+                  className="px-4 py-2 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                >
+                  <Bell className="size-4" />
+                  <span>Enable Notifications</span>
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={handleSendTestNotification}
+                disabled={isNotifTesting}
+                className="px-4 py-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-bold text-xs flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              >
+                <BellRing className={`size-4 text-sky-400 ${isNotifTesting ? "animate-spin" : ""}`} />
+                <span>Send Test Alert</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Explanation note */}
+          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5 text-[11px] text-white/70 flex items-start gap-2.5">
+            <Check className="size-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-white/90">How it works:</p>
+              <p className="text-white/60 mt-0.5">
+                If your internet connection was turned off and people messaged you, Gupshup automatically sends native device notifications to your Windows Action Center, Android notification bar, or macOS notification panel the moment your internet reconnects.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Visual Themes Grid */}
         <div className="glass-panel p-6 sm:p-7 rounded-3xl border border-white/10 shadow-2xl bg-slate-900/60 backdrop-blur-2xl space-y-4">
           <div className="flex items-center gap-2.5">
             <Sparkles className="size-5 text-indigo-400" />

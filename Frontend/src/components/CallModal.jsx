@@ -23,7 +23,32 @@ const RTC_CONFIG = {
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:global.stun.twilio.com:3478" },
   ],
+  iceCandidatePoolSize: 10,
+};
+
+const waitForIceGathering = (pc, timeoutMs = 800) => {
+  return new Promise((resolve) => {
+    if (pc.iceGatheringState === "complete") {
+      resolve();
+      return;
+    }
+    const checkState = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", checkState);
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    const timer = setTimeout(() => {
+      pc.removeEventListener("icegatheringstatechange", checkState);
+      resolve();
+    }, timeoutMs);
+    pc.addEventListener("icegatheringstatechange", checkState);
+  });
 };
 
 const CallModal = () => {
@@ -72,7 +97,11 @@ const CallModal = () => {
     }
 
     if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
+      try {
+        peerConnectionRef.current.close();
+      } catch (e) {
+        console.warn("Error closing RTCPeerConnection:", e);
+      }
       peerConnectionRef.current = null;
     }
 
@@ -108,6 +137,9 @@ const CallModal = () => {
       if (!AudioCtx) return;
 
       const audioCtx = new AudioCtx();
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().catch(() => {});
+      }
       audioContextRef.current = audioCtx;
 
       const analyser = audioCtx.createAnalyser();
@@ -142,23 +174,40 @@ const CallModal = () => {
 
   // ================= 3. HANDLE REMOTE TRACKS =================
   const handleRemoteTrack = useCallback((event) => {
-    let stream = event.streams && event.streams[0];
+    console.log("[WebRTC] Remote track received:", event.track?.kind, event.streams);
+
+    let stream = remoteStreamRef.current;
     if (!stream) {
-      if (!remoteStreamRef.current) {
-        remoteStreamRef.current = new MediaStream();
-      }
-      remoteStreamRef.current.addTrack(event.track);
-      stream = remoteStreamRef.current;
-    } else {
+      stream = new MediaStream();
       remoteStreamRef.current = stream;
+    }
+
+    // Add individual track to persistent stream
+    if (event.track) {
+      const exists = stream.getTracks().some((t) => t.id === event.track.id);
+      if (!exists) {
+        stream.addTrack(event.track);
+      }
+    }
+
+    // Merge tracks from event.streams if available
+    if (event.streams && event.streams[0]) {
+      event.streams[0].getTracks().forEach((track) => {
+        const exists = stream.getTracks().some((t) => t.id === track.id);
+        if (!exists) {
+          stream.addTrack(track);
+        }
+      });
     }
 
     setRemoteHasStream(true);
 
     // Play remote audio
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = stream;
-      remoteAudioRef.current.muted = false;
+      if (remoteAudioRef.current.srcObject !== stream) {
+        remoteAudioRef.current.srcObject = stream;
+      }
+      remoteAudioRef.current.muted = !isSpeakerOn;
       remoteAudioRef.current.volume = isSpeakerOn ? 1.0 : 0.0;
       remoteAudioRef.current
         .play()
@@ -166,15 +215,19 @@ const CallModal = () => {
           setAutoplayBlocked(false);
         })
         .catch((err) => {
-          console.warn("Remote audio autoplay blocked by browser policy:", err);
+          console.warn("[WebRTC] Remote audio autoplay blocked by browser policy:", err);
           setAutoplayBlocked(true);
         });
     }
 
     // Play remote video if video call
     if (remoteVideoRef.current && isVideoCall) {
-      remoteVideoRef.current.srcObject = stream;
-      remoteVideoRef.current.play().catch(() => {});
+      if (remoteVideoRef.current.srcObject !== stream) {
+        remoteVideoRef.current.srcObject = stream;
+      }
+      remoteVideoRef.current.play().catch((err) => {
+        console.warn("[WebRTC] Remote video play error:", err);
+      });
     }
   }, [isSpeakerOn, isVideoCall]);
 
@@ -246,13 +299,20 @@ const CallModal = () => {
       const pc = new RTCPeerConnection(RTC_CONFIG);
       peerConnectionRef.current = pc;
 
-      // Add tracks
+      // Add local media tracks
       stream.getTracks().forEach((track) => {
         pc.addTrack(track, stream);
       });
 
       // Handle remote incoming tracks
       pc.ontrack = handleRemoteTrack;
+
+      pc.onconnectionstatechange = () => {
+        console.log("[WebRTC Caller] Connection state:", pc.connectionState);
+      };
+      pc.oniceconnectionstatechange = () => {
+        console.log("[WebRTC Caller] ICE connection state:", pc.iceConnectionState);
+      };
 
       // Handle ICE Candidates
       pc.onicecandidate = (event) => {
@@ -265,14 +325,22 @@ const CallModal = () => {
       };
 
       // Create Offer
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: isVideoCall,
+      });
       await pc.setLocalDescription(offer);
+
+      // Brief wait to gather initial host/srflx candidates directly into SDP
+      await waitForIceGathering(pc, 600);
+
+      const sdpToSend = pc.localDescription || offer;
 
       // Emit callUser with actual offer
       if (socket && targetUser) {
         socket.emit("callUser", {
           userToCall: targetUser._id,
-          signalData: offer,
+          signalData: sdpToSend,
           from: authUser?._id,
           name: authUser?.fullName,
           avatar: authUser?.profilePic,
@@ -304,12 +372,19 @@ const CallModal = () => {
       const pc = new RTCPeerConnection(RTC_CONFIG);
       peerConnectionRef.current = pc;
 
-      // Add tracks
+      // Add local media tracks
       stream.getTracks().forEach((track) => {
         pc.addTrack(track, stream);
       });
 
       pc.ontrack = handleRemoteTrack;
+
+      pc.onconnectionstatechange = () => {
+        console.log("[WebRTC Receiver] Connection state:", pc.connectionState);
+      };
+      pc.oniceconnectionstatechange = () => {
+        console.log("[WebRTC Receiver] ICE connection state:", pc.iceConnectionState);
+      };
 
       pc.onicecandidate = (event) => {
         if (event.candidate && socket && targetUser) {
@@ -321,27 +396,35 @@ const CallModal = () => {
       };
 
       // Set Remote Description from incoming signal (offer)
-      if (incomingSignal) {
-        await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
+      const signal = incomingSignal || callState.incomingSignal;
+      if (signal) {
+        const sdp = signal instanceof RTCSessionDescription ? signal : new RTCSessionDescription(signal);
+        await pc.setRemoteDescription(sdp);
 
-        // Drain queued ICE candidates
-        for (const cand of iceCandidatesQueueRef.current) {
+        // Drain any queued ICE candidates that arrived while phone was ringing
+        while (iceCandidatesQueueRef.current.length > 0) {
+          const cand = iceCandidatesQueueRef.current.shift();
           try {
-            await pc.addIceCandidate(new RTCIceCandidate(cand));
+            const iceCand = cand instanceof RTCIceCandidate ? cand : new RTCIceCandidate(cand);
+            await pc.addIceCandidate(iceCand);
           } catch (e) {
-            console.warn("Error adding queued ICE candidate:", e);
+            console.warn("Error adding queued ICE candidate on receiver:", e);
           }
         }
-        iceCandidatesQueueRef.current = [];
 
         // Create and send SDP Answer
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
+        // Brief wait to gather initial host/srflx candidates directly into SDP
+        await waitForIceGathering(pc, 600);
+
+        const sdpToSend = pc.localDescription || answer;
+
         if (socket && targetUser) {
           socket.emit("answerCall", {
             to: targetUser._id,
-            signal: answer,
+            signal: sdpToSend,
           });
         }
       }
@@ -356,29 +439,25 @@ const CallModal = () => {
   };
 
   // ================= 6. LIFECYCLE EFFECT =================
+  // Initialize call based on role
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (isCaller && status === "calling" && !peerConnectionRef.current) {
+      initCaller();
+    } else if (!isCaller && status === "connected" && !peerConnectionRef.current) {
+      answerIncomingCall();
+    }
+  }, [isOpen, isCaller, status]);
+
+  // Teardown ONLY when modal actually closes
   useEffect(() => {
     if (!isOpen) {
       cleanupCall();
       setCallDuration(0);
       setCameraError(null);
-      return;
     }
-
-    if (isCaller && status === "calling") {
-      initCaller();
-    }
-
-    return () => {
-      cleanupCall();
-    };
-  }, [isOpen, isCaller]);
-
-  // When receiver clicks Accept and status becomes "connected"
-  useEffect(() => {
-    if (isOpen && !isCaller && status === "connected" && !peerConnectionRef.current) {
-      answerIncomingCall();
-    }
-  }, [status, isOpen, isCaller]);
+  }, [isOpen, cleanupCall]);
 
   // ================= 7. SOCKET SIGNALING LISTENERS =================
   useEffect(() => {
@@ -388,19 +467,25 @@ const CallModal = () => {
     const handleCallAccepted = async ({ signal } = {}) => {
       soundFx.stopRingtone();
       const pc = peerConnectionRef.current;
-      if (pc && signal && pc.signalingState !== "closed") {
+      const sdpData = signal || incomingSignal || callState.incomingSignal;
+
+      if (pc && sdpData && pc.signalingState !== "closed") {
         try {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          if (pc.signalingState === "have-local-offer") {
+            const sdp = sdpData instanceof RTCSessionDescription ? sdpData : new RTCSessionDescription(sdpData);
+            await pc.setRemoteDescription(sdp);
+          }
 
           // Drain any ICE candidates queued before answer arrived
-          for (const cand of iceCandidatesQueueRef.current) {
+          while (iceCandidatesQueueRef.current.length > 0) {
+            const cand = iceCandidatesQueueRef.current.shift();
             try {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
+              const iceCand = cand instanceof RTCIceCandidate ? cand : new RTCIceCandidate(cand);
+              await pc.addIceCandidate(iceCand);
             } catch (e) {
-              console.warn("Error adding queued ICE candidate:", e);
+              console.warn("Error adding queued ICE candidate on caller:", e);
             }
           }
-          iceCandidatesQueueRef.current = [];
         } catch (e) {
           console.warn("Error setting remote description on caller:", e);
         }
@@ -409,16 +494,18 @@ const CallModal = () => {
 
     // Both receive ICE candidates
     const handleIceCandidate = async ({ candidate }) => {
+      if (!candidate) return;
       const pc = peerConnectionRef.current;
-      if (!pc || !candidate) return;
 
-      if (pc.remoteDescription && pc.remoteDescription.type) {
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          const iceCand = candidate instanceof RTCIceCandidate ? candidate : new RTCIceCandidate(candidate);
+          await pc.addIceCandidate(iceCand);
         } catch (e) {
           console.warn("Error adding ICE candidate:", e);
         }
       } else {
+        // Safe queuing even if peerConnection is not yet instantiated
         iceCandidatesQueueRef.current.push(candidate);
       }
     };
@@ -430,7 +517,42 @@ const CallModal = () => {
       socket.off("callAccepted", handleCallAccepted);
       socket.off("iceCandidate", handleIceCandidate);
     };
-  }, [socket, isOpen]);
+  }, [socket, isOpen, incomingSignal, callState.incomingSignal]);
+
+  // Sync remote video stream whenever element mounts or remote stream updates
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [remoteHasStream, status, isVideoCall]);
+
+  // Sync local video stream whenever element mounts or local stream updates
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      if (localVideoRef.current.srcObject !== localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      localVideoRef.current.play().catch(() => {});
+    }
+  }, [status, isVideoCall, isVideoEnabled, remoteHasStream]);
+
+  // Sync remote audio stream whenever element mounts or speaker state updates
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStreamRef.current) {
+      if (remoteAudioRef.current.srcObject !== remoteStreamRef.current) {
+        remoteAudioRef.current.srcObject = remoteStreamRef.current;
+      }
+      remoteAudioRef.current.muted = !isSpeakerOn;
+      remoteAudioRef.current.volume = isSpeakerOn ? 1.0 : 0.0;
+      remoteAudioRef.current
+        .play()
+        .then(() => setAutoplayBlocked(false))
+        .catch(() => setAutoplayBlocked(true));
+    }
+  }, [remoteHasStream, isSpeakerOn, status]);
 
   // ================= 8. CONTROLS & TOGGLES =================
   const toggleVideo = () => {
@@ -510,6 +632,12 @@ const CallModal = () => {
 
   const handleAcceptCall = () => {
     soundFx.resume();
+    // Warm up the audio element on direct user gesture to unlock browser autoplay policy
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
+      remoteAudioRef.current.play().catch(() => {});
+    }
     acceptCall();
   };
 
@@ -539,7 +667,19 @@ const CallModal = () => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xl p-4 animate-fade-in">
       {/* Remote Audio Receiver Element (Direct audio connection for remote user's voice) */}
-      <audio ref={remoteAudioRef} autoPlay playsInline />
+      <audio
+        ref={(el) => {
+          remoteAudioRef.current = el;
+          if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) {
+            el.srcObject = remoteStreamRef.current;
+            el.muted = !isSpeakerOn;
+            el.volume = isSpeakerOn ? 1.0 : 0.0;
+            el.play().then(() => setAutoplayBlocked(false)).catch(() => setAutoplayBlocked(true));
+          }
+        }}
+        autoPlay
+        playsInline
+      />
 
       {/* Local Microphone Loopback Element (For hearing your own voice through headphones/speakers) */}
       <audio ref={loopbackAudioRef} playsInline />
@@ -573,16 +713,46 @@ const CallModal = () => {
         {isVideoCall ? (
           <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-slate-950">
             {/* Main Stage Video: Shows REMOTE video if connected, or LOCAL preview if calling/waiting */}
-            {status === "connected" && remoteHasStream ? (
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                className="absolute inset-0 w-full h-full object-cover z-0"
-              />
+            {status === "connected" ? (
+              remoteHasStream ? (
+                <video
+                  ref={(el) => {
+                    remoteVideoRef.current = el;
+                    if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) {
+                      el.srcObject = remoteStreamRef.current;
+                      el.play().catch(() => {});
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  className="absolute inset-0 w-full h-full object-cover z-0"
+                />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-0 space-y-4">
+                  <div className="relative">
+                    <div className="size-28 rounded-full overflow-hidden border-2 border-sky-400 shadow-[0_0_30px_rgba(56,189,248,0.4)]">
+                      <img src={avatarUrl} alt={targetUser.fullName} className="w-full h-full object-cover" />
+                    </div>
+                    <span className="absolute inset-0 rounded-full border-2 border-sky-400 animate-ping opacity-60 pointer-events-none" />
+                  </div>
+                  <div className="text-center px-4">
+                    <h4 className="text-white font-bold text-lg">{targetUser.fullName}</h4>
+                    <p className="text-xs text-sky-400 font-medium flex items-center justify-center gap-1.5 mt-1">
+                      <span className="size-2 rounded-full bg-sky-400 animate-pulse" />
+                      Connecting video and audio stream...
+                    </p>
+                  </div>
+                </div>
+              )
             ) : isVideoEnabled && !cameraError ? (
               <video
-                ref={localVideoRef}
+                ref={(el) => {
+                  localVideoRef.current = el;
+                  if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                    el.srcObject = localStreamRef.current;
+                    el.play().catch(() => {});
+                  }
+                }}
                 autoPlay
                 playsInline
                 muted
@@ -607,7 +777,13 @@ const CallModal = () => {
               <div className="absolute bottom-24 right-4 z-30 w-32 sm:w-44 aspect-video rounded-2xl overflow-hidden border-2 border-white/25 shadow-2xl bg-black">
                 {isVideoEnabled && !cameraError ? (
                   <video
-                    ref={localVideoRef}
+                    ref={(el) => {
+                      localVideoRef.current = el;
+                      if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                        el.srcObject = localStreamRef.current;
+                        el.play().catch(() => {});
+                      }
+                    }}
                     autoPlay
                     playsInline
                     muted

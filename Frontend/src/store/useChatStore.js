@@ -3,6 +3,11 @@ import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 import { soundFx } from "../lib/audioSound";
+import {
+  showDeviceNotification,
+  formatMessagePreview,
+  notifyOfflineMessages,
+} from "../lib/deviceNotification";
 
 export const useChatStore = create((set, get) => ({
   messages: [],
@@ -666,6 +671,23 @@ export const useChatStore = create((set, get) => ({
       } else {
         get().getUsers();
       }
+
+      // Trigger native device notification if tab is hidden or outside active chat
+      const isHidden = typeof document !== "undefined" && document.hidden;
+      if (isHidden || !isFromActiveChat) {
+        const senderName = existingUser?.fullName || "New Message";
+        showDeviceNotification({
+          title: senderName,
+          body: formatMessagePreview(newMessage),
+          icon: existingUser?.profilePic,
+          senderId: senderId,
+          isGroup: false,
+          onClick: () => {
+            const u = get().users.find((user) => user._id === senderId);
+            if (u) get().setSelectedUser(u);
+          },
+        });
+      }
     });
 
     // GROUP NEW MESSAGE LISTENER
@@ -692,6 +714,25 @@ export const useChatStore = create((set, get) => ({
         set({ groups: [updatedGroup, ...rest] });
       } else {
         get().getGroups();
+      }
+
+      // Trigger native device notification if tab is hidden or outside active group
+      const isHidden = typeof document !== "undefined" && document.hidden;
+      if (isHidden || !isFromActiveGroup) {
+        const groupName = existingGroup?.name || "Group Message";
+        const senderName = newMessage.senderId?.fullName || "Member";
+        showDeviceNotification({
+          title: `${groupName} • ${senderName}`,
+          body: formatMessagePreview(newMessage),
+          icon: existingGroup?.groupPic,
+          senderId: newMessage.senderId?._id || newMessage.senderId,
+          isGroup: true,
+          groupId: newMessage.groupId,
+          onClick: () => {
+            const g = get().groups.find((group) => group._id === newMessage.groupId);
+            if (g) get().setSelectedUser(g);
+          },
+        });
       }
     });
 
@@ -812,6 +853,25 @@ export const useChatStore = create((set, get) => ({
       });
     });
 
+    // Ensure global call listeners are also active
+    get().subscribeToCalls();
+  },
+
+  // ================= GLOBAL CALL SIGNALING SUBSCRIPTION =================
+  subscribeToCalls: () => {
+    const socket = useAuthStore.getState().socket;
+    if (!socket) return;
+
+    // Remove existing call listeners to prevent duplicates
+    socket.off("incomingCall");
+    socket.off("callAccepted");
+    socket.off("callRejected");
+    socket.off("callEnded");
+    socket.off("incomingGroupCall");
+    socket.off("groupCallParticipantJoined");
+    socket.off("groupCallParticipantLeft");
+    socket.off("groupCallParticipantStateUpdated");
+
     // 1-on-1 CALL SIGNALING
     socket.on("incomingCall", ({ from, name, avatar, callType, signal }) => {
       set({
@@ -819,6 +879,7 @@ export const useChatStore = create((set, get) => ({
           isOpen: true,
           callType: callType || "audio",
           status: "incoming",
+          isCaller: false,
           incomingSignal: signal || null,
           targetUser: {
             _id: from,
@@ -836,7 +897,7 @@ export const useChatStore = create((set, get) => ({
         callState: {
           ...state.callState,
           status: "connected",
-          incomingSignal: signal || null,
+          incomingSignal: signal || state.callState.incomingSignal,
         },
       }));
     });
@@ -947,6 +1008,73 @@ export const useChatStore = create((set, get) => ({
         },
       }));
     });
+
+    // OFFLINE MESSAGES LISTENER (Triggered when user turns on internet / reconnects)
+    socket.off("offlineMessagesReceived");
+    socket.on("offlineMessagesReceived", (offlineMessages) => {
+      console.log("[Socket] Received offline messages:", offlineMessages?.length);
+      if (!Array.isArray(offlineMessages) || offlineMessages.length === 0) return;
+
+      // 1. Show device notification on notification panel with sender name & message
+      notifyOfflineMessages(offlineMessages, (sender) => {
+        const user = get().users.find((u) => u._id === sender._id) || sender;
+        get().setSelectedUser(user);
+      });
+
+      // 2. Refresh sidebar contacts and groups
+      get().getUsers();
+      get().getGroups();
+
+      // 3. If currently open chat matches, append new messages
+      const currentChat = get().selectedUser;
+      if (currentChat && !currentChat.isGroup) {
+        const relevant = offlineMessages.filter((m) => {
+          const sId = typeof m.senderId === "object" ? m.senderId?._id : m.senderId;
+          return sId?.toString() === currentChat._id?.toString();
+        });
+        if (relevant.length > 0) {
+          set((state) => {
+            const existingIds = new Set(state.messages.map((m) => m._id));
+            const newItems = relevant.filter((m) => !existingIds.has(m._id));
+            return { messages: [...state.messages, ...newItems] };
+          });
+        }
+      }
+    });
+  },
+
+  unsubscribeFromCalls: () => {
+    const socket = useAuthStore.getState().socket;
+    if (!socket) return;
+    socket.off("incomingCall");
+    socket.off("callAccepted");
+    socket.off("callRejected");
+    socket.off("callEnded");
+    socket.off("incomingGroupCall");
+    socket.off("groupCallParticipantJoined");
+    socket.off("groupCallParticipantLeft");
+    socket.off("groupCallParticipantStateUpdated");
+    socket.off("offlineMessagesReceived");
+  },
+
+  checkOfflineMessages: async () => {
+    const socket = useAuthStore.getState().socket;
+    if (socket) {
+      socket.emit("checkOfflineMessages");
+    }
+
+    try {
+      const res = await axiosInstance.get("/messages/unread-offline");
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        notifyOfflineMessages(res.data, (sender) => {
+          const user = get().users.find((u) => u._id === sender._id) || sender;
+          get().setSelectedUser(user);
+        });
+        get().getUsers();
+      }
+    } catch (err) {
+      console.warn("Could not fetch offline unread messages:", err);
+    }
   },
 
   unsubscribeFromMessages: () => {
@@ -965,14 +1093,6 @@ export const useChatStore = create((set, get) => ({
     socket.off("groupUserStoppedTyping");
     socket.off("messageReaction");
     socket.off("messageDeleted");
-    socket.off("incomingCall");
-    socket.off("callAccepted");
-    socket.off("callRejected");
-    socket.off("callEnded");
-    socket.off("incomingGroupCall");
-    socket.off("groupCallParticipantJoined");
-    socket.off("groupCallParticipantLeft");
-    socket.off("groupCallParticipantStateUpdated");
   },
 
   setSelectedUser: (selectedUser) => {

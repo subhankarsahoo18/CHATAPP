@@ -7,12 +7,14 @@ import {
   searchUsers,
   toggleReaction,
   deleteMessage,
+  getUnreadOfflineMessages,
 } from "../controllers/messageController.js";
 
 const router = express.Router();
 
 router.get("/users", protectRoute, getUsersForSidebar);
 router.get("/search", protectRoute, searchUsers);
+router.get("/unread-offline", protectRoute, getUnreadOfflineMessages);
 router.get("/:id", protectRoute, getMessages);
 router.post("/send/:id", protectRoute, sendMessage);
 router.post("/react/:id", protectRoute, toggleReaction);

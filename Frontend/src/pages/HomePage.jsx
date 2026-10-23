@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
+import { useAuthStore } from "../store/useAuthStore";
 import Sidebar from "../components/Sidebar";
 import NoChatSelected from "../components/NoChatSelected";
 import ChatContainer from "../components/ChatContainer";
@@ -8,9 +10,75 @@ import CallModal from "../components/CallModal";
 import CreateGroupModal from "../components/CreateGroupModal";
 import AddMembersModal from "../components/AddMembersModal";
 import GroupCallModal from "../components/GroupCallModal";
+import NotificationPromptBanner from "../components/NotificationPromptBanner";
+import toast from "react-hot-toast";
 
 const HomePage = () => {
-  const { selectedUser } = useChatStore();
+  const {
+    selectedUser,
+    setSelectedUser,
+    users,
+    groups,
+    subscribeToCalls,
+    checkOfflineMessages,
+    getUsers,
+    getGroups,
+  } = useChatStore();
+  const { socket } = useAuthStore();
+
+  // Ensure call signaling is continuously active whenever the socket is connected
+  useEffect(() => {
+    if (socket) {
+      subscribeToCalls();
+    }
+  }, [socket, subscribeToCalls]);
+
+  // 🔥 DETECT WHEN USER TURNS ON INTERNET CONNECTION
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log("[Network] Internet connection restored!");
+      toast.success("Internet connection restored! Checking for messages...", {
+        icon: "🌐",
+      });
+      checkOfflineMessages();
+      getUsers();
+      getGroups();
+    };
+
+    window.addEventListener("online", handleOnline);
+
+    // Initial check when page mounts if user is already online
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      checkOfflineMessages();
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [checkOfflineMessages, getUsers, getGroups]);
+
+  // Handle clicking notifications from device notification shade / panel
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      const handleSwMessage = (event) => {
+        if (event.data?.type === "OPEN_CHAT") {
+          const { senderId, isGroup, groupId } = event.data;
+          if (isGroup && groupId) {
+            const foundGroup = groups.find((g) => g._id === groupId);
+            if (foundGroup) setSelectedUser(foundGroup);
+          } else if (senderId) {
+            const foundUser = users.find((u) => u._id === senderId);
+            if (foundUser) setSelectedUser(foundUser);
+          }
+        }
+      };
+
+      navigator.serviceWorker.addEventListener("message", handleSwMessage);
+      return () => {
+        navigator.serviceWorker.removeEventListener("message", handleSwMessage);
+      };
+    }
+  }, [users, groups, setSelectedUser]);
 
   return (
     <div
@@ -54,6 +122,9 @@ const HomePage = () => {
 
         {/* Add Members to Group modal */}
         <AddMembersModal />
+
+        {/* WhatsApp-style Device Notification Permission Prompt */}
+        <NotificationPromptBanner />
       </div>
     </div>
   );

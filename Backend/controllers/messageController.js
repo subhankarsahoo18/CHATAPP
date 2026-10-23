@@ -331,3 +331,33 @@ export const deleteMessage = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
+
+// ================= GET UNREAD OFFLINE MESSAGES =================
+export const getUnreadOfflineMessages = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Find all unread messages received by this user while offline or disconnected
+    const unreadMessages = await Message.find({
+      receiverId: userId,
+      status: { $ne: "read" },
+      deletedFor: { $nin: [userId] },
+    })
+      .populate("senderId", "fullName username profilePic")
+      .populate("replyTo", "text senderId image audio")
+      .sort({ createdAt: 1 })
+      .limit(100);
+
+    // Update 'sent' messages to 'delivered'
+    await Message.updateMany(
+      { receiverId: userId, status: "sent" },
+      { $set: { status: "delivered" } }
+    );
+    io.emit("messagesDelivered", { receiverId: userId });
+
+    res.status(200).json(unreadMessages);
+  } catch (error) {
+    console.error("Error in getUnreadOfflineMessages:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};

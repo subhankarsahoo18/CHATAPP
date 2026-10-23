@@ -30,7 +30,9 @@ const userSocketMap = {};
 // { userId: socketId }
 
 export function getReceiverSocketId(userId) {
-  return userSocketMap[userId];
+  if (!userId) return null;
+  const key = typeof userId === "object" ? (userId._id || userId).toString() : userId.toString();
+  return userSocketMap[key];
 }
 
 io.on("connection", async (socket) => {
@@ -41,19 +43,57 @@ io.on("connection", async (socket) => {
   if (userId) {
     userSocketMap[userId.toString()] = socket.id;
 
-    // 🔥 Update all 'sent' messages to 'delivered' since user is online
+    // 🔥 Find and deliver messages that arrived while user was offline (internet off)
     if (mongoose.connection.readyState === 1) {
       try {
-        await Message.updateMany(
-          { receiverId: userId, status: "sent" },
-          { $set: { status: "delivered" } }
-        );
-        io.emit("messagesDelivered", { receiverId: userId });
+        const pendingMessages = await Message.find({
+          receiverId: userId,
+          status: "sent",
+        })
+          .populate("senderId", "fullName username profilePic")
+          .populate("replyTo", "text senderId image audio")
+          .sort({ createdAt: 1 });
+
+        if (pendingMessages.length > 0) {
+          await Message.updateMany(
+            { receiverId: userId, status: "sent" },
+            { $set: { status: "delivered" } }
+          );
+
+          // Notify senders that messages are delivered (double ticks)
+          io.emit("messagesDelivered", { receiverId: userId });
+
+          // Send all messages that arrived while offline to the reconnecting user
+          socket.emit("offlineMessagesReceived", pendingMessages);
+          console.log(`[Socket] Delivered ${pendingMessages.length} offline messages to user ${userId}`);
+        }
       } catch (err) {
         console.log("Error updating delivered status:", err);
       }
     }
   }
+
+  // Explicit check for offline messages requested by frontend on network recovery
+  socket.on("checkOfflineMessages", async () => {
+    if (!userId || mongoose.connection.readyState !== 1) return;
+    try {
+      const pendingMessages = await Message.find({
+        receiverId: userId,
+        status: { $ne: "read" },
+        deletedFor: { $nin: [userId] },
+      })
+        .populate("senderId", "fullName username profilePic")
+        .populate("replyTo", "text senderId image audio")
+        .sort({ createdAt: 1 })
+        .limit(50);
+
+      if (pendingMessages.length > 0) {
+        socket.emit("offlineMessagesReceived", pendingMessages);
+      }
+    } catch (err) {
+      console.log("Error in checkOfflineMessages:", err);
+    }
+  });
 
   // Send updated online users to all clients
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
@@ -86,6 +126,7 @@ io.on("connection", async (socket) => {
   // ================= CALL SIGNALING =================
   socket.on("callUser", ({ userToCall, signalData, from, name, callType, avatar }) => {
     const receiverSocketId = getReceiverSocketId(userToCall);
+    console.log(`[Socket] callUser: from=${from} to=${userToCall} socketId=${receiverSocketId} type=${callType}`);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("incomingCall", {
         signal: signalData,
@@ -99,6 +140,7 @@ io.on("connection", async (socket) => {
 
   socket.on("answerCall", ({ to, signal }) => {
     const receiverSocketId = getReceiverSocketId(to);
+    console.log(`[Socket] answerCall: to=${to} socketId=${receiverSocketId}`);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("callAccepted", { signal });
     }
@@ -106,6 +148,7 @@ io.on("connection", async (socket) => {
 
   socket.on("rejectCall", ({ to }) => {
     const receiverSocketId = getReceiverSocketId(to);
+    console.log(`[Socket] rejectCall: to=${to} socketId=${receiverSocketId}`);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("callRejected");
     }
@@ -113,6 +156,7 @@ io.on("connection", async (socket) => {
 
   socket.on("endCall", ({ to }) => {
     const receiverSocketId = getReceiverSocketId(to);
+    console.log(`[Socket] endCall: to=${to} socketId=${receiverSocketId}`);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("callEnded");
     }
